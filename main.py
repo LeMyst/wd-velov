@@ -77,10 +77,10 @@ print('Start parsing JSON')
 with open('velov.json') as jsonfile:
     data = json.load(jsonfile)
     for station in data['values']:
-        pprint(station)
+        # pprint(station)
 
-        idstation = station['idstation']
-        nom = station['nom']
+        idstation = int(station['idstation'])
+        nom = station['nom'].strip()
 
         ft_search = wbi_helpers.fulltext_search(search='Station Vélo\'v ' + str(idstation))
         if not ft_search or len(ft_search) == 0 or 'title' not in ft_search[0]:
@@ -125,7 +125,7 @@ with open('velov.json') as jsonfile:
         wd_item.claims.add(claims=Quantity(prop_nr='P1083', amount=station['nbbornettes']))  # maximum capacity
         wd_item.claims.add(claims=ExternalID(prop_nr='P11878', value=str(idstation)))  # Vélo'v station ID
         wd_item.claims.add(claims=GlobeCoordinate(prop_nr='P625', latitude=station['lat'], longitude=station['lon'], precision=0.0001))  # coordinate location
-        if station['commune'] in administrative_locations:
+        if station['commune'].strip() in administrative_locations:
             wd_item.claims.add(claims=Item(prop_nr='P131', value=administrative_locations[station['commune']]))  # located in the administrative territorial entity
         else:
             raise ValueError('Commune not found: ' + station['commune'])
@@ -133,4 +133,7 @@ with open('velov.json') as jsonfile:
         # pprint(wd_item.get_json())
 
         if wd_item.get_json() != old_item.get_json():
+            # from jsondiff import diff
+            # pprint(diff(wd_item.get_json(), old_item.get_json()))
+            # pprint(diff(old_item.get_json(), wd_item.get_json()))
             wd_item.write(summary='Update station information')

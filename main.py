@@ -2,6 +2,7 @@ import copy
 import json
 import logging
 import os
+import re
 import time
 from pprint import pprint
 
@@ -9,6 +10,7 @@ import requests
 from wikibaseintegrator import WikibaseIntegrator, wbi_helpers, wbi_login
 from wikibaseintegrator.datatypes import ExternalID, GlobeCoordinate, Item, Quantity
 from wikibaseintegrator.wbi_config import config as wbi_config
+from wikibaseintegrator.wbi_enums import ActionIfExists
 
 import config
 
@@ -27,7 +29,8 @@ administrative_locations = {
     'Rillieux-la-Pape': 'Q386122',
     'Saint-Didier-au-Mont-d\'Or': 'Q1617501',
     'La Mulatière': 'Q772460',
-    'Oullins': 'Q8358',
+    # 'Oullins': 'Q8358',
+    'Oullins': 'Q123852858',
     'Écully': 'Q273748',
     'Fontaines-sur-Saône': 'Q1617114',
     'Tassin-la-Demi-Lune': 'Q1647506',
@@ -40,7 +43,8 @@ administrative_locations = {
     'Saint-Genis-Laval': 'Q910089',
     'Albigny-sur-Saône': 'Q840195',
     'Bron': 'Q1291',
-    'Pierre-Bénite': 'Q1617042',
+    # 'Pierre-Bénite': 'Q1617042',
+    'Pierre-Bénite': 'Q123852858',
     'Saint-Priest': 'Q331083',
     'Lyon 1er Arrondissement': 'Q3337',
     'Lyon 2e Arrondissement': 'Q3344',
@@ -55,6 +59,8 @@ administrative_locations = {
 
 # login object
 login_instance = wbi_login.Login(user=config.user, password=config.password)
+# login_instance = wbi_login.OAuth2(consumer_token=config.consumer_token, consumer_secret=config.consumer_secret)
+
 
 wbi = WikibaseIntegrator(login=login_instance, is_bot=True)
 
@@ -66,7 +72,7 @@ base_filter = [
     ExternalID(prop_nr='P374')  # INSEE municipality code
 ]
 
-if time.time() - os.path.getmtime('velov.json') > 86400:
+if not os.path.isfile('velov.json') or time.time() - os.path.getmtime('velov.json') > 86400:
     r = requests.get(json_velov, allow_redirects=True)
     open('velov.json', 'wb').write(r.content)
 
@@ -80,7 +86,7 @@ with open('velov.json') as jsonfile:
         # pprint(station)
 
         idstation = int(station['idstation'])
-        nom = station['nom'].strip()
+        nom = re.sub(' +', ' ', station['nom'].strip())
 
         ft_search = wbi_helpers.fulltext_search(search='Station Vélo\'v ' + str(idstation))
         if not ft_search or len(ft_search) == 0 or 'title' not in ft_search[0]:
@@ -126,7 +132,7 @@ with open('velov.json') as jsonfile:
         wd_item.claims.add(claims=ExternalID(prop_nr='P11878', value=str(idstation)))  # Vélo'v station ID
         wd_item.claims.add(claims=GlobeCoordinate(prop_nr='P625', latitude=station['lat'], longitude=station['lon'], precision=0.0001))  # coordinate location
         if station['commune'].strip() in administrative_locations:
-            wd_item.claims.add(claims=Item(prop_nr='P131', value=administrative_locations[station['commune']]))  # located in the administrative territorial entity
+            wd_item.claims.add(claims=Item(prop_nr='P131', value=administrative_locations[station['commune'].strip()]), action_if_exists=ActionIfExists.KEEP)  # located in the administrative territorial entity
         else:
             raise ValueError('Commune not found: ' + station['commune'])
 
@@ -136,4 +142,7 @@ with open('velov.json') as jsonfile:
             # from jsondiff import diff
             # pprint(diff(wd_item.get_json(), old_item.get_json()))
             # pprint(diff(old_item.get_json(), wd_item.get_json()))
+            pprint(wd_item.get_json())
+            print('Update item ' + wd_item.id)
             wd_item.write(summary='Update station information')
+            # exit(0)

@@ -54,7 +54,9 @@ administrative_locations = {
     'Lyon 6e Arrondissement': 'Q3358',
     'Lyon 7e Arrondissement': 'Q3360',
     'Lyon 8e Arrondissement': 'Q3363',
-    'Lyon 9e Arrondissement': 'Q3366'
+    'Lyon 9e Arrondissement': 'Q3366',
+    'Chassieu': 'Q1617692',
+    'Saint-Germain-au-Mont-d\'Or': 'Q1617721',
 }
 
 # login object
@@ -80,10 +82,11 @@ if os.path.isfile('somefile.txt'):
     os.remove('somefile.txt')
 
 print('Start parsing JSON')
-with open('velov.json') as jsonfile:
+with open('velov.json', encoding='utf-8') as jsonfile:
     data = json.load(jsonfile)
     for station in data['values']:
-        # pprint(station)
+        # Remove double quote in key
+        station = {k.replace('"', ''): v for k, v in station.items()}
 
         idstation = int(station['idstation'])
         nom = re.sub(' +', ' ', station['nom'].strip())
@@ -143,6 +146,10 @@ with open('velov.json') as jsonfile:
             # pprint(diff(wd_item.get_json(), old_item.get_json()))
             # pprint(diff(old_item.get_json(), wd_item.get_json()))
             pprint(wd_item.get_json())
-            print('Update item ' + wd_item.id)
-            wd_item.write(summary='Update station information')
+            if wd_item.id is None:
+                print('Create item ' + wd_item.labels.get('fr').value)
+                wd_item.write(summary='Create station information')
+            else:
+                print('Update item ' + wd_item.id)
+                wd_item.write(summary='Update station information')
             # exit(0)

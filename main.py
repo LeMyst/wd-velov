@@ -18,7 +18,35 @@ import config
 
 json_velov = 'https://download.data.grandlyon.com/ws/grandlyon/pvo_patrimoine_voirie.pvostationvelov/all.json?maxfeatures=-1'
 
-wbi_config['USER_AGENT'] = 'Update Vélo\'v station'
+wbi_config['USER_AGENT'] = 'wd-velov/1.0 (https://www.wikidata.org/wiki/User:' + config.user.split('@')[0].replace(' ', '_') + ')'
+
+
+def with_retry(func, *args, max_retries=5, **kwargs):
+    """Call an API helper, backing off when the server answers HTTP 429 (Too Many Requests)."""
+    for attempt in range(max_retries):
+        try:
+            return func(*args, **kwargs)
+        except requests.exceptions.HTTPError as e:
+            if e.response is None or e.response.status_code != 429:
+                raise
+            wait = min(int(e.response.headers.get('Retry-After') or 60) * (attempt + 1), 300)
+            print('HTTP 429 (rate limited), sleeping for ' + str(wait) + ' seconds')
+            time.sleep(wait)
+    raise RuntimeError('Still rate limited after ' + str(max_retries) + ' retries')
+
+
+def get_known_stations():
+    """Map every Vélo'v station ID (P11878) to its item in one SPARQL query, instead of one search per station."""
+    results = wbi_helpers.execute_sparql_query(query='SELECT ?item ?id WHERE { ?item wdt:P11878 ?id . }')['results']['bindings']
+    return {result['id']['value']: result['item']['value'].rsplit('/', 1)[1] for result in results}
+
+
+# Stations a fulltext search can't disambiguate on its own
+station_overrides = {
+    2016: 'Q62088312',  # Place Regaud
+    2023: 'Q117288534',  # Perrache / Petit
+    7052: 'Q62087535',  # Parc Blandan
+}
 
 administrative_locations = {
     'Villeurbanne': 'Q582',
@@ -57,6 +85,7 @@ administrative_locations = {
     'Lyon 9e Arrondissement': 'Q3366',
     'Chassieu': 'Q1617692',
     'Saint-Germain-au-Mont-d\'Or': 'Q1617721',
+    'Champagne-au-Mont-d\'Or': 'Q1617133',
 }
 
 # login object
@@ -81,6 +110,9 @@ if not os.path.isfile('velov.json') or time.time() - os.path.getmtime('velov.jso
 if os.path.isfile('somefile.txt'):
     os.remove('somefile.txt')
 
+known_stations = get_known_stations()
+print('Found ' + str(len(known_stations)) + ' existing station items')
+
 print('Start parsing JSON')
 with open('velov.json', encoding='utf-8') as jsonfile:
     data = json.load(jsonfile)
@@ -88,25 +120,29 @@ with open('velov.json', encoding='utf-8') as jsonfile:
         # Remove double quote in key
         station = {k.replace('"', ''): v for k, v in station.items()}
 
+        if station['validite'] != 'Validé':
+            continue
+
         idstation = int(station['idstation'])
         nom = re.sub(' +', ' ', station['nom'].strip())
 
-        ft_search = wbi_helpers.fulltext_search(search='Station Vélo\'v ' + str(idstation))
-        if not ft_search or len(ft_search) == 0 or 'title' not in ft_search[0]:
-            wd_item = wbi.item.new()
-        else:
-            if idstation == 2016:  # Place Regaud
-                item_id = 'Q62088312'
-            elif idstation == 2023:  # Perrache / Petit
-                item_id = 'Q117288534'
-            elif idstation == 7052:  # Parc Blandan
-                item_id = 'Q62087535'
-            elif len(ft_search) == 1 and 'title' in ft_search[0]:
+        item_id = station_overrides.get(idstation) or known_stations.get(str(idstation))
+
+        if item_id is None:
+            # Not linked through P11878 yet: fall back to a search, authenticated (anonymous calls are rate limited hard)
+            ft_search = with_retry(wbi_helpers.fulltext_search, search="Station Vélo'v " + str(idstation), login=login_instance, allow_anonymous=False)
+            if not ft_search or 'title' not in ft_search[0]:
+                pass
+            elif len(ft_search) == 1:
                 item_id = ft_search[0]['title']
             else:
                 with open('somefile.txt', 'a') as the_file:
-                    the_file.write(str(idstation) + '\n')
+                    the_file.write(str(idstation) + "\n")
                 continue
+
+        if item_id is None:
+            wd_item = wbi.item.new()
+        else:
             wd_item = wbi.item.get(entity_id=item_id)
             # pprint(wd_item.get_json())
 
@@ -134,9 +170,10 @@ with open('velov.json', encoding='utf-8') as jsonfile:
         wd_item.claims.add(claims=Quantity(prop_nr='P1083', amount=station['nbbornettes']))  # maximum capacity
         wd_item.claims.add(claims=ExternalID(prop_nr='P11878', value=str(idstation)))  # Vélo'v station ID
         wd_item.claims.add(claims=GlobeCoordinate(prop_nr='P625', latitude=station['lat'], longitude=station['lon'], precision=0.0001))  # coordinate location
-        if station['commune'].strip() in administrative_locations:
+        if station['commune'] and station['commune'].strip() in administrative_locations:
             wd_item.claims.add(claims=Item(prop_nr='P131', value=administrative_locations[station['commune'].strip()]), action_if_exists=ActionIfExists.KEEP)  # located in the administrative territorial entity
         else:
+            pprint(station)
             raise ValueError('Commune not found: ' + station['commune'])
 
         # pprint(wd_item.get_json())

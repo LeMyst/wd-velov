@@ -102,12 +102,6 @@ print('EditGroups batch: ' + editgroup.url)
 
 logging.basicConfig(level=logging.DEBUG)
 
-base_filter = [
-    Item(prop_nr='P31', value='Q484170'),  # instance of commune of France
-    Item(prop_nr='P17', value='Q142'),  # country France
-    ExternalID(prop_nr='P374')  # INSEE municipality code
-]
-
 if not os.path.isfile('velov.json') or time.time() - os.path.getmtime('velov.json') > 86400:
     r = requests.get(json_velov, allow_redirects=True)
     open('velov.json', 'wb').write(r.content)

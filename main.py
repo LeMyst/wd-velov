@@ -10,6 +10,7 @@ import requests
 from wikibaseintegrator import WikibaseIntegrator, wbi_helpers, wbi_login
 from wikibaseintegrator.datatypes import ExternalID, GlobeCoordinate, Item, Quantity
 from wikibaseintegrator.wbi_config import config as wbi_config
+from wikibaseintegrator.wbi_editgroups import EditGroup
 from wikibaseintegrator.wbi_enums import ActionIfExists
 
 import config
@@ -95,6 +96,10 @@ login_instance = wbi_login.Login(user=config.user, password=config.password)
 
 wbi = WikibaseIntegrator(login=login_instance, is_bot=True)
 
+# Group the edits of this run as one batch on EditGroups, to review or revert them at once
+editgroup = EditGroup()
+print('EditGroups batch: ' + editgroup.url)
+
 logging.basicConfig(level=logging.DEBUG)
 
 base_filter = [
@@ -162,14 +167,16 @@ with open('velov.json', encoding='utf-8') as jsonfile:
         # Aliases
         wd_item.aliases.set(language='en', values=nom)
 
-        # Claims
-        wd_item.claims.add(claims=Item(prop_nr='P31', value='Q61663696'))  # instance of bicycle-sharing station
-        wd_item.claims.add(claims=Item(prop_nr='P361', value='Q4096'))  # part of Vélo'v
-        wd_item.claims.add(claims=Item(prop_nr='P17', value='Q142'))  # country France
-        wd_item.claims.add(claims=Item(prop_nr='P137', value='Q74877'))  # operator JCDecaux
-        wd_item.claims.add(claims=Quantity(prop_nr='P1083', amount=station['nbbornettes']))  # maximum capacity
-        wd_item.claims.add(claims=ExternalID(prop_nr='P11878', value=str(idstation)))  # Vélo'v station ID
-        wd_item.claims.add(claims=GlobeCoordinate(prop_nr='P625', latitude=station['lat'], longitude=station['lon'], precision=0.0001))  # coordinate location
+        # Claims, replacing the existing values (claims.add() appends by default since wikibaseintegrator 0.13)
+        wd_item.claims.add(claims=[
+            Item(prop_nr='P31', value='Q61663696'),  # instance of bicycle-sharing station
+            Item(prop_nr='P361', value='Q4096'),  # part of Vélo'v
+            Item(prop_nr='P17', value='Q142'),  # country France
+            Item(prop_nr='P137', value='Q74877'),  # operator JCDecaux
+            Quantity(prop_nr='P1083', amount=station['nbbornettes']),  # maximum capacity
+            ExternalID(prop_nr='P11878', value=str(idstation)),  # Vélo'v station ID
+            GlobeCoordinate(prop_nr='P625', latitude=round(station['lat'], 6), longitude=round(station['lon'], 6), precision=0.0001),  # coordinate location
+        ], action_if_exists=ActionIfExists.REPLACE_ALL)
         if station['commune'] and station['commune'].strip() in administrative_locations:
             wd_item.claims.add(claims=Item(prop_nr='P131', value=administrative_locations[station['commune'].strip()]), action_if_exists=ActionIfExists.KEEP)  # located in the administrative territorial entity
         else:
@@ -185,8 +192,8 @@ with open('velov.json', encoding='utf-8') as jsonfile:
             pprint(wd_item.get_json())
             if wd_item.id is None:
                 print('Create item ' + wd_item.labels.get('fr').value)
-                wd_item.write(summary='Create station information')
+                wd_item.write(summary=editgroup.summary('Create station information'))
             else:
                 print('Update item ' + wd_item.id)
-                wd_item.write(summary='Update station information')
+                wd_item.write(summary=editgroup.summary('Update station information'))
             # exit(0)
